@@ -192,7 +192,7 @@ class EWiseDiv(TensorOp):
         lhs, rhs = node.inputs
         lhs = lhs.data
         rhs = rhs.data
-        lgrad = divide(Tensor.make_const(array_api.ones(rhs.shape)), rhs).data
+        lgrad = power_scalar(rhs, -1).data
         rgrad = negate(divide(lhs, power_scalar(rhs, 2))).data
         return (out_grad * lgrad, out_grad * rgrad)
 
@@ -255,7 +255,7 @@ class Reshape(TensorOp):
     
     @logMetric(name='Reshape_forward')
     def compute(self, a):
-        return array_api.reshape(a, self.shape)
+        return array_api.reshape(a.compact(), self.shape)
     
     @logMetric(name='Reshape_backward')
     def gradient(self, out_grad, node):
@@ -273,7 +273,7 @@ class BroadcastTo(TensorOp):
 
     @logMetric(name='BroadcastTo_forward')
     def compute(self, a):
-        return array_api.broadcast_to(a, self.shape)
+        return array_api.broadcast_to(a, self.shape).compact()
     
     @logMetric(name='BroadcastTo_backward')
     def gradient(self, out_grad, node):
@@ -304,7 +304,14 @@ class Summation(TensorOp):
 
     @logMetric(name='Summation_forward')
     def compute(self, a):
-        return array_api.sum(a, axis=self.axes)
+        # need to investigate and understand later
+        if (self.axes != None and len(self.axes) > 1):
+            result = a
+            for axis in reversed(sorted(self.axes)):
+                result = array_api.summation(result, axis=axis)
+            return result
+        else:
+            return array_api.sum(a, axis=self.axes)
     
     @logMetric(name='Summation_backward')
     def gradient(self, out_grad, node):
@@ -489,6 +496,18 @@ class Tanh(TensorOp):
 def tanh(a):
     return Tanh()(a)
 
+class Sigmoid(TensorOp):
+    def compute(self, a):
+        return 1 / (1 + array_api.exp(-1 * a))
+
+    def gradient(self, out_grad, node):
+        out_grad = out_grad.cached_data
+        x = node.inputs[0].cached_data
+        sx = Sigmoid().compute(a)
+        return Tensor.make_const(out_grad * sx * (1 - sx))
+
+def sigmoid(a):
+    return Sigmoid()(a)
 
 class Stack(TensorOp):
     def __init__(self, axis: int):
@@ -521,7 +540,7 @@ class Stack(TensorOp):
                     slices.append(slice(0, shape_j_len, 1))
             res.__setitem__(tuple(slices), args[i])
         
-        return res
+        return res.compact()
 
     def gradient(self, out_grad, node):
         out_grad_ndarray = out_grad.cached_data
@@ -580,14 +599,10 @@ class Flip(TensorOp):
         self.axes = axes
 
     def compute(self, a):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        return a.flip(self.axes)
 
     def gradient(self, out_grad, node):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        return out_grad.cached_data.flip(self.axes)
 
 
 def flip(a, axes):
@@ -597,18 +612,38 @@ def flip(a, axes):
 
 class Dilate(TensorOp):
     def __init__(self, axes: tuple, dilation: int):
-        self.axes = axes
+        if type(axes) == int:
+            self.axes = (axes)
+        else:
+            self.axes = axes
         self.dilation = dilation
 
+        # print("the axes: {} and the dilation: {}".format(self.axes, self.dilation))
+
     def compute(self, a):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        new_shape = [x for x in a.shape]
+        for i in range(len(new_shape)):
+            if i in self.axes and self.dilation > 0:
+                new_shape[i] += new_shape[i] * self.dilation
+        
+        array = NDArray.make(tuple(new_shape), device=a._device)
+
+        init_slices = []
+        for i in range(len(new_shape)):
+            init_slices.append(slice(0, new_shape[i], 1))
+        array.__setitem__(tuple(init_slices), 0)
+        set_slices = []
+        for i in range(len(new_shape)):
+            if i in self.axes:
+                set_slices.append(slice(0, new_shape[i], self.dilation + 1))
+            else:
+                set_slices.append(slice(0, new_shape[i], 1))
+        array.__setitem__(tuple(set_slices), a)
+        return array
 
     def gradient(self, out_grad, node):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        res = UnDilate(self.axes, self.dilation).compute(out_grad.cached_data)
+        return Tensor.make_const(res)
 
 
 def dilate(a, axes, dilation):
@@ -616,18 +651,27 @@ def dilate(a, axes, dilation):
 
 class UnDilate(TensorOp):
     def __init__(self, axes: tuple, dilation: int):
-        self.axes = axes
+        if type(axes) == int:
+            self.axes = (axes)
+        else:
+            self.axes = axes
         self.dilation = dilation
 
+        # print("the axes: {} and the dilation: {}".format(self.axes, self.dilation))
+
     def compute(self, a):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        shape = a.shape
+        get_slices = []
+        for i in range(len(shape)):
+            if i in self.axes:
+                get_slices.append(slice(0, shape[i], self.dilation + 1))
+            else:
+                get_slices.append(slice(0, shape[i], 1))
+        return a.__getitem__(tuple(get_slices))
 
     def gradient(self, out_grad, node):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        res = Dilate(self.axes, self.dilation).compute(out_grad.cached_data)
+        return Tensor.make_const(res)
 
 
 def undilate(a, axes, dilation):
@@ -638,20 +682,69 @@ class Conv(TensorOp):
     def __init__(self, stride: Optional[int] = 1, padding: Optional[int] = 0):
         self.stride = stride
         self.padding = padding
+        # print("The padding:{}, the stride:{}".format(self.padding, self.stride))
 
-    def compute(self, A, B):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+    def compute(self, Z, weight):
+        # print("The Z's shape:{} and the weight's shape:{}".format(Z.shape, weight.shape))
+        if self.padding > 0:
+            Z = Z.pad(((0,0), (self.padding,self.padding), (self.padding,self.padding), (0,0)))
+            # print("The Z's shape:{} and the weight's shape:{}".format(Z.shape, weight.shape))
+        
+        N,H,W,C_in = Z.shape
+        K,_,_,C_out = weight.shape
+
+        Ns,Hs,Ws,Cs = Z.strides
+
+        inner_dim = K * K * C_in
+
+        new_H = (H-K+1) // self.stride
+        new_W = (W-K+1) // self.stride
+
+        # For the strides, I do not understand how it works. Need to take time to review it later
+        A = NDArray.make((N, new_H, new_W, K, K, C_in), \
+        strides=(Ns, Hs * self.stride, Ws * self.stride, Hs, Ws, Cs), \
+        device=Z.device, handle=Z._handle, offset=Z._offset) \
+        .compact() \
+        .reshape((N * new_H * new_W, inner_dim))
+
+        # print("The A content:{}".format(A))
+        out = A @ weight.compact().reshape((inner_dim, C_out))
+
+        return out.compact().reshape((N, new_H, new_W, C_out))
 
     def gradient(self, out_grad, node):
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        X, weight = node.inputs
+
+        N,H,W,C_in = X.shape
+        K,_,_,C_out = weight.shape
+
+        X = X.cached_data
+        weight = weight.cached_data
+        out_grad = out_grad.cached_data
+
+        if self.stride > 1:
+            out_grad = Dilate((1,2), self.stride - 1).compute(out_grad)
+
+        _, H_out, W_out, _ = out_grad.shape
+
+        # print("\nThe X ({}, {}) and W ({}, {}) and out_grad ({}, {})" \
+        # .format(type(X), X.shape, type(weight), weight.shape, type(out_grad), out_grad.shape))
+
+        # computate X
+        t_w = weight.flip((0,1)).permute((0,1,3,2)).compact()
+        t_p = K - self.padding - 1
+        X_g = Conv(1, t_p).compute(out_grad, t_w)
+        
+        # computate W
+        t_x = X.permute((3,1,2,0)).compact()
+        t_g = out_grad.permute((1,0,2,3)).permute((0,2,1,3)).compact()
+        t_p = (H_out - H + K - 1) // 2
+        res = Conv(1, t_p).compute(t_x,t_g)
+        W_g = res.permute((1,0,2,3)).permute((0,2,1,3))
+
+        return (Tensor.make_const(X_g), Tensor.make_const(W_g))
 
 
 def conv(a, b, stride=1, padding=1):
     return Conv(stride, padding)(a, b)
-
-
 

@@ -106,10 +106,10 @@ __global__ void CompactKernel(const scalar_t* a, scalar_t* out, size_t size, Cud
    *   offset: offset of out array
    */
   size_t gid = blockIdx.x * blockDim.x + threadIdx.x;
-
+  
   if (gid < size) {
-    size_t aIdx = 0;
-    size_t start = gid;
+    int aIdx = 0;
+    int start = gid;
     for(int i = 0;i < compact_strides.size;i++) {
       aIdx += (start / compact_strides.data[i]) * strides.data[i];
       start %= compact_strides.data[i];

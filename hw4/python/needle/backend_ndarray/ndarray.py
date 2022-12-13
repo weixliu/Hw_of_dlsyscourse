@@ -9,6 +9,48 @@ from . import ndarray_backend_cpu
 def prod(x):
     return reduce(operator.mul, x, 1)
 
+# simulation, there might be equation to compute this
+def flip_offset(shape, axes):
+    total = prod(shape)
+
+    array = [x for x in range(total)]
+    idx = [0]
+    
+    def flip_generator(shape, depth):
+        if depth == len(shape) - 1:
+            res = []
+            for i in range(shape[depth]):
+                res.append(array[idx[0]])
+                idx[0] += 1
+        else:
+            res = []
+            for i in range(shape[depth]):
+                res.append(flip_generator(shape, depth+1))
+        return res
+    
+    tmp_array = flip_generator(shape, 0)
+    
+    if type(axes) == int:
+        axes = [axes]
+    axes_set = set(axes)
+    
+    def reverse_help(depth, tmp_array):
+        if depth in axes_set:
+            tmp_array.reverse()
+        if depth == len(shape) - 1:
+                return
+        for i in range(len(tmp_array)):
+            reverse_help(depth + 1, tmp_array[i])
+    
+    reverse_help(0, tmp_array)
+    
+    def first_one(tmp_array):
+        if type(tmp_array[0]) == int:
+            return tmp_array[0]
+        return first_one(tmp_array[0])
+    
+    return first_one(tmp_array)
+
 
 class BackendDevice:
     """A backend device, wrapps the implementation module."""
@@ -279,6 +321,7 @@ class NDArray:
         ### BEGIN YOUR SOLUTION
         strides = [x for x in self._strides]
         shape = [x for x in self._shape]
+        
         for i in range(len(self._shape)):
             if(i == new_axes[i]):
                 pass
@@ -616,10 +659,23 @@ class NDArray:
         Flip this ndarray along the specified axes.
         Note: compact() before returning.
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        shape = self._shape
+        new_offset = flip_offset(shape, axes)
 
+        new_strides = []
+        if type(axes) == int:
+            axes = [axes]
+        axes_set = set(axes)
+        for i in range(len(shape)):
+            if i in axes_set:
+                new_strides.append(-1 * self._strides[i])
+            else:
+                new_strides.append(self._strides[i])
+        array = self.make(self._shape, strides=new_strides, handle=self._handle, device=self._device, offset=new_offset)
+        # why this did not work, need to investigate
+        # print(array)
+        res = array.compact()
+        return res
 
     def pad(self, axes):
         """
