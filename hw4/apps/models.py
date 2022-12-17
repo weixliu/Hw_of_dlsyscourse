@@ -60,8 +60,19 @@ class LanguageModel(nn.Module):
         """
         super(LanguageModel, self).__init__()
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        self.embedding_size = embedding_size
+        self.output_size = output_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.seq_model = seq_model
+        self.device = device
+        self.dtype = dtype
         ### END YOUR SOLUTION
+        self.embedding_layer = nn.Embedding(output_size, embedding_size, device=device, dtype=dtype)
+        self.rnn_layer = nn.RNN(embedding_size, hidden_size, num_layers=num_layers, device=device, dtype=dtype) if seq_model=='rnn' \
+            else nn.LSTM(embedding_size, hidden_size, num_layers=num_layers, device=device, dtype=dtype)
+        self.linear_layer = nn.Linear(hidden_size, output_size, device=device, dtype=dtype)
+        
 
     def forward(self, x, h=None):
         """
@@ -76,9 +87,12 @@ class LanguageModel(nn.Module):
         h of shape (num_layers, bs, hidden_size) if using RNN,
             else h is tuple of (h0, c0), each of shape (num_layers, bs, hidden_size)
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        seq_len, bs = x.shape
+        a = self.embedding_layer(x)
+        (out, h) = self.rnn_layer(a, h)
+        out = out.reshape((seq_len * bs, self.hidden_size))
+        c = self.linear_layer(out)
+        return c, h
 
 
 if __name__ == "__main__":

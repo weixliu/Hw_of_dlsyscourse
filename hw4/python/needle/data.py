@@ -301,17 +301,17 @@ class Dictionary(object):
         and appends to the list of words.
         Returns the word's unique ID.
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        if word not in self.word2idx:
+            idx = len(self.idx2word)
+            self.word2idx[word] = idx
+            self.idx2word.append(word)
+        return self.word2idx[word]
 
     def __len__(self):
         """
         Returns the number of unique words in the dictionary.
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        return len(self.word2idx)
 
 
 
@@ -336,9 +336,21 @@ class Corpus(object):
         Output:
         ids: List of ids
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        fr = open(path)
+        line_num = 0
+        res = []
+        for line in fr.readlines():
+            line_num += 1
+            
+            words = line.split()
+            for word in words:
+                res.append(self.dictionary.add_word(word))
+            res.append(self.dictionary.add_word('<eos>'))
+
+            if max_lines != None and line_num >= max_lines:
+                break
+        fr.close()
+        return res
 
 
 def batchify(data, batch_size, device, dtype):
@@ -357,9 +369,10 @@ def batchify(data, batch_size, device, dtype):
     If the data cannot be evenly divided by the batch size, trim off the remainder.
     Returns the data as a numpy array of shape (nbatch, batch_size).
     """
-    ### BEGIN YOUR SOLUTION
-    raise NotImplementedError()
-    ### END YOUR SOLUTION
+    nbatch = len(data) // batch_size
+    data = data[:nbatch * batch_size]
+    data = np.array(data, dtype=dtype).reshape((batch_size, nbatch)).T
+    return data
 
 
 def get_batch(batches, i, bptt, device=None, dtype=None):
@@ -381,6 +394,9 @@ def get_batch(batches, i, bptt, device=None, dtype=None):
     data - Tensor of shape (bptt, bs) with cached data as NDArray
     target - Tensor of shape (bptt*bs,) with cached data as NDArray
     """
-    ### BEGIN YOUR SOLUTION
-    raise NotImplementedError()
-    ### END YOUR SOLUTION
+    nbatch, bs = batches.shape
+    left = nbatch - i
+    bptt = min(bptt + 1, left) - 1
+    res = (Tensor(batches[i:i+bptt].reshape(bptt, bs), device=device, dtype=dtype, requires_grad=False), \
+    Tensor(batches[i+1:i+1+bptt].flatten(), device=device, dtype=dtype, requires_grad=False))
+    return res

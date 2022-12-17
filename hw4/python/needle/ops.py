@@ -498,12 +498,12 @@ def tanh(a):
 
 class Sigmoid(TensorOp):
     def compute(self, a):
-        return 1 / (1 + array_api.exp(-1 * a))
+        return array_api.power((1 + array_api.exp(-1 * a)), -1)
 
     def gradient(self, out_grad, node):
         out_grad = out_grad.cached_data
         x = node.inputs[0].cached_data
-        sx = Sigmoid().compute(a)
+        sx = Sigmoid().compute(x)
         return Tensor.make_const(out_grad * sx * (1 - sx))
 
 def sigmoid(a):

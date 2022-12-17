@@ -291,9 +291,17 @@ class RNNCell(Module):
         Weights and biases are initialized from U(-sqrt(k), sqrt(k)) where k = 1/hidden_size
         """
         super().__init__()
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.bias = bias
+        self.nonlinearity=nonlinearity
+
+        val = math.sqrt(1 / hidden_size)
+        self.W_ih = Parameter(init.rand(input_size, hidden_size, low=-val, high=val, device=device))
+        self.W_hh = Parameter(init.rand(hidden_size, hidden_size, low=-val, high=val, device=device))
+        self.bias_ih = Parameter(init.rand(hidden_size, low=-val, high=val, device=device))
+        self.bias_hh = Parameter(init.rand(hidden_size, low=-val, high=val, device=device))
 
     def forward(self, X, h=None):
         """
@@ -306,9 +314,19 @@ class RNNCell(Module):
         h' of shape (bs, hidden_size): Tensor contianing the next hidden state
             for each element in the batch.
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        Z = X @ self.W_ih
+        if (self.bias):
+            # print("the biasih shape:{}, and Z shape:{}".format(self.bias_ih.shape, Z.shape))
+            Z = Z + self.bias_ih.reshape((1, self.hidden_size)).broadcast_to(Z.shape)
+        if (h != None):
+            Z = Z + h @ self.W_hh
+        if (self.bias):
+            # print("the biashh shape:{}, and Z shape:{}".format(self.bias_hh.shape, Z.shape))
+            Z = Z + self.bias_hh.reshape((1, self.hidden_size)).broadcast_to(Z.shape)
+        if self.nonlinearity == 'relu':
+            return ops.relu(Z)
+        else:
+            return ops.tanh(Z)
 
 
 class RNN(Module):
@@ -334,10 +352,19 @@ class RNN(Module):
         rnn_cells[k].bias_hh: The learnable hidden-hidden bias of the k-th layer,
             of shape (hidden_size,).
         """
-        super().__init__()
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.bias = bias
+        self.nonlinearity = nonlinearity
+        self.device = device
+        self.dtype = dtype
+
+        self.rnn_cells = []
+        for i in range(num_layers):
+            self.rnn_cells.append(
+                RNNCell(self.input_size if i == 0 else self.hidden_size, self.hidden_size, bias = self.bias, nonlinearity = self.nonlinearity, device = self.device, dtype = self.dtype)
+            )
 
     def forward(self, X, h0=None):
         """
@@ -351,32 +378,53 @@ class RNN(Module):
             (h_t) from the last layer of the RNN, for each t.
         h_n of shape (num_layers, bs, hidden_size) containing the final hidden state for each element in the batch.
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
-
+        seq_len, bs, hidden_size = X.shape
+        input = ops.split(X, 0)
+        if h0 == None:
+            h0 = init.zeros(self.num_layers, bs, self.hidden_size, device=self.device, dtype=self.dtype)
+        split_h_0 = ops.split(h0, 0)
+        output = []
+        split_h_x = split_h_0
+        for i in range(seq_len):
+            input_i = input[i]
+            next_h_x = []
+            for layer in range(self.num_layers):
+                h_x = split_h_x[layer]
+                input_i = self.rnn_cells[layer](input_i, h_x)
+                next_h_x.append(input_i)
+            split_h_x = next_h_x
+            output.append(input_i)
+        return ops.stack(output, 0), ops.stack(split_h_x, 0)
 
 class LSTMCell(Module):
     def __init__(self, input_size, hidden_size, bias=True, device=None, dtype="float32"):
         """
         A long short-term memory (LSTM) cell.
-
         Parameters:
         input_size - The number of expected features in the input X
         hidden_size - The number of features in the hidden state h
         bias - If False, then the layer does not use bias weights
-
         Variables:
         W_ih - The learnable input-hidden weights, of shape (input_size, 4*hidden_size).
         W_hh - The learnable hidden-hidden weights, of shape (hidden_size, 4*hidden_size).
         bias_ih - The learnable input-hidden bias, of shape (4*hidden_size,).
         bias_hh - The learnable hidden-hidden bias, of shape (4*hidden_size,).
-
         Weights and biases are initialized from U(-sqrt(k), sqrt(k)) where k = 1/hidden_size
         """
         super().__init__()
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        self.dtype = dtype
+        self.device = device
+        self.input_size = input_size
+        self.hidden_size = hidden_size
+        self.sigmoid_fn = Sigmoid()
+        self.tanh_fn = Tanh()
+
+        init_arg = math.sqrt(1/hidden_size)
+        self.W_ih = Parameter(init.rand(input_size, hidden_size * 4, low=-init_arg, high=init_arg, device=device, dtype=dtype))
+        self.W_hh = Parameter(init.rand(hidden_size, hidden_size * 4, low=-init_arg, high=init_arg, device=device, dtype=dtype))
+        self.bias_ih = Parameter(init.rand(hidden_size * 4, low=-init_arg, high=init_arg, device=device, dtype=dtype)) if bias else None
+        self.bias_hh = Parameter(init.rand(hidden_size * 4, low=-init_arg, high=init_arg, device=device, dtype=dtype)) if bias else None
         ### END YOUR SOLUTION
 
 
@@ -389,7 +437,6 @@ class LSTMCell(Module):
                 for each element in the batch. Defaults to zero if not provided.
             c0 of shape (bs, hidden_size): Tensor containing the initial cell state
                 for each element in the batch. Defaults to zero if not provided.
-
         Outputs: (h', c')
         h' of shape (bs, hidden_size): Tensor containing the next hidden state for each
             element in the batch.
@@ -397,8 +444,30 @@ class LSTMCell(Module):
             element in the batch.
         """
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        
+        batch_size = X.shape[0]
+        h0, c0 = h if h else (None, None)
+        h_in = h0 or init.zeros(batch_size, self.hidden_size, device=self.device, dtype=self.dtype)
+        c_in = c0 or init.zeros(batch_size, self.hidden_size, device=self.device, dtype=self.dtype)
+
+        tmp = (h_in @ self.W_hh) # shape=(batch_size, 4*hidden_size)
+        if self.bias_hh:
+            tmp += ops.broadcast_to(ops.reshape(self.bias_hh, shape=(1,self.hidden_size * 4)), shape=tmp.shape)
+        
+        tmp += (X @ self.W_ih) # shape=(batch_size, 4*hidden_size)
+        if self.bias_ih:
+            tmp += ops.broadcast_to(ops.reshape(self.bias_ih, shape=(1,self.hidden_size * 4)), shape=tmp.shape)
+        
+        tmp_parts = ops.split(ops.reshape(tmp, (batch_size, 4, self.hidden_size)), axis=1)
+        tmp_i = self.sigmoid_fn(tmp_parts[0])
+        tmp_f = self.sigmoid_fn(tmp_parts[1])
+        tmp_g = self.tanh_fn(tmp_parts[2])
+        tmp_o = self.sigmoid_fn(tmp_parts[3])
+
+        c_out = c_in * tmp_f + tmp_i * tmp_g
+        h_out = self.tanh_fn(c_out) * tmp_o
+        
+        return h_out, c_out
 
 
 class LSTM(Module):
@@ -406,13 +475,11 @@ class LSTM(Module):
         super().__init__()
         """
         Applies a multi-layer long short-term memory (LSTM) RNN to an input sequence.
-
         Parameters:
         input_size - The number of expected features in the input x
         hidden_size - The number of features in the hidden state h
         num_layers - Number of recurrent layers.
         bias - If False, then the layer does not use bias weights.
-
         Variables:
         lstm_cells[k].W_ih: The learnable input-hidden weights of the k-th layer,
             of shape (input_size, 4*hidden_size) for k=0. Otherwise the shape is
@@ -425,7 +492,18 @@ class LSTM(Module):
             of shape (4*hidden_size,).
         """
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
+        self.dtype = dtype
+        self.device = device
+        self.hidden_size = hidden_size
+        self.num_layers = num_layers
+        self.lstm_cells = [
+            LSTMCell(
+                input_size if layer_idx == 0 else hidden_size, 
+                hidden_size, 
+                bias, 
+                device, 
+                dtype
+            ) for layer_idx in range(num_layers)]
         ### END YOUR SOLUTION
 
     def forward(self, X, h=None):
@@ -437,7 +515,6 @@ class LSTM(Module):
                 hidden state for each element in the batch. Defaults to zeros if not provided.
             c0 of shape (num_layers, bs, hidden_size) containing the initial
                 hidden cell state for each element in the batch. Defaults to zeros if not provided.
-
         Outputs: (output, (h_n, c_n))
         output of shape (seq_len, bs, hidden_size) containing the output features
             (h_t) from the last layer of the LSTM, for each t.
@@ -446,8 +523,33 @@ class LSTM(Module):
             h_n of shape (num_layers, bs, hidden_size) containing the final hidden cell state for each element in the batch.
         """
         ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+
+        batch_size = X.shape[1]
+        (H0, C0) = h if h else (None, None)
+        H0 = H0 or init.zeros(self.num_layers, batch_size, self.hidden_size, device=self.device, dtype=self.dtype)
+        C0 = C0 or init.zeros(self.num_layers, batch_size, self.hidden_size, device=self.device, dtype=self.dtype)
+        H0 = list(ops.split(H0, axis=0))
+        C0 = list(ops.split(C0, axis=0))
+
+        H_t = H0
+        C_t = C0
+        output = []
+        for t, X_t in enumerate(list(ops.split(X, axis=0))):
+            H_next = []
+            C_next = []
+            for layer_idx, (h_t, c_t) in enumerate(zip(H_t, C_t)):
+                h_next, c_next = self.lstm_cells[layer_idx](X_t, (h_t, c_t))
+                X_t = h_next
+                H_next.append(h_next)
+                C_next.append(c_next)
+            output.append(h_next)
+            H_t = H_next
+            C_t = C_next
+
+        H_n = ops.stack(tuple(H_t), axis=0)
+        C_n = ops.stack(tuple(C_t), axis=0)
+        output = ops.stack(tuple(output), axis=0)
+        return output, (H_n, C_n)
 
 
 class Embedding(Module):
@@ -464,9 +566,11 @@ class Embedding(Module):
         weight - The learnable weights of shape (num_embeddings, embedding_dim)
             initialized from N(0, 1).
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        self.num_embeddings = num_embeddings
+        self.embedding_dim = embedding_dim
+        self.device = device
+        self.dtype = dtype
+        self.weight = Parameter(init.randn(num_embeddings, embedding_dim, device=device, dtype=dtype))
 
     def forward(self, x: Tensor) -> Tensor:
         """
@@ -478,6 +582,9 @@ class Embedding(Module):
         Output:
         output of shape (seq_len, bs, embedding_dim)
         """
-        ### BEGIN YOUR SOLUTION
-        raise NotImplementedError()
-        ### END YOUR SOLUTION
+        seq_len, bs = x.shape
+        one_hot = init.one_hot(self.num_embeddings, x.cached_data.flat, device=self.device, dtype=self.dtype)
+        res = (one_hot @ self.weight).reshape((seq_len, bs, self.embedding_dim))
+        return res
+
+        
