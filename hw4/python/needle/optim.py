@@ -89,7 +89,7 @@ class Adam(Optimizer):
           
           grad = param.grad.data
           if(self.weight_decay > 0):
-            grad = grad + self.weight_decay * param
+            grad = grad + self.weight_decay * param.data
           if(i not in self.m):
             self.m[i] = ((1 - self.beta1) * grad).data
           else:
@@ -103,7 +103,9 @@ class Adam(Optimizer):
           v_i = self.v[i]
           if(self.bias_correction):
             m_i = self.m[i] / (1.0 - self.beta1**self.t)
+            m_i.detach()
             v_i = self.v[i] / (1.0 - self.beta2**self.t)
+            v_i.detach()
           
           minus = ops.negate(self.lr * m_i / (v_i**0.5 + self.eps))
           #param.data = (1 - self.lr * self.weight_decay) * param.data - minus

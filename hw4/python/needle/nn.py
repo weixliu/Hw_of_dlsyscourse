@@ -113,6 +113,13 @@ class ReLU(Module):
     def forward(self, x: Tensor) -> Tensor:
         return ops.relu(x)
 
+class LeakyReLU(Module):
+    def __init__(self, negative_slope=0.01):
+      self.negative_slope = negative_slope
+
+    def forward(self, x: Tensor) -> Tensor:
+        return ops.leakyrelu(x, self.negative_slope)
+
 
 class Tanh(Module):
     def forward(self, x: Tensor) -> Tensor:
@@ -148,6 +155,10 @@ class SoftmaxLoss(Module):
         res = numerator / np.float32(logits.shape[0])
         return res
 
+class BCELoss(Module):
+    def forward(self, p: Tensor, y: Tensor):
+        return -1 * ops.summation(y * ops.log(p + 1e-12) \
+        + (1 - y) * ops.log(1 - p + 1e-12)) / y.shape[0]
 
 class BatchNorm1d(Module):
     def __init__(self, dim, eps=1e-5, momentum=0.1, device=None, dtype="float32"):
@@ -221,7 +232,7 @@ class Dropout(Module):
     def forward(self, x: Tensor) -> Tensor:
         if not self.training:
           return x
-        random_tensor = init.randb(*x.shape, p = (1 - self.p), device=x.device) / (1-self.p)
+        random_tensor = init.randb(*x.shape, p = (1 - self.p), device=x.device, dtype=x.dtype) / (1-self.p)
         return x * (random_tensor.data)
 
 
@@ -587,4 +598,43 @@ class Embedding(Module):
         res = (one_hot @ self.weight).reshape((seq_len, bs, self.embedding_dim))
         return res
 
+class DiscriminatorNet(Module):
+    """
+    A three hidden-layer discriminative neural network
+    """
+    def __init__(self, input_size=784, device=None, dtype="float32"):
+        super().__init__()
+        self.input_size=input_size
         
+        self.model = Sequential(
+            Linear(input_size, 200, device=device, dtype=dtype),
+            LeakyReLU(0.02),
+            LayerNorm1d(200),
+            Linear(200, 1, device=device, dtype=dtype),
+            Sigmoid()
+        )
+
+    def forward(self, x):
+        x = self.model(x)
+        return x
+
+class GeneratorNet(Module):
+    """
+    A three hidden-layer generative neural network
+    """
+    def __init__(self, input_size=100, output_size=784, device=None, dtype="float32"):
+        super().__init__()
+        self.input_size = input_size
+        self.output_size = output_size
+
+        self.model = Sequential(
+            Linear(input_size, 200, device=device, dtype=dtype),
+            LeakyReLU(0.02),
+            LayerNorm1d(200),
+            Linear(200, output_size, device=device, dtype=dtype),
+            Sigmoid(),
+        )
+
+    def forward(self, x):
+        x = self.model(x)
+        return x

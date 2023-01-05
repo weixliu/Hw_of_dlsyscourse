@@ -2,6 +2,28 @@ import math
 import needle as ndl
 
 
+def noise(size, device=None, dtype="float32"):
+    n = rand(size, 100, device=device, dtype=dtype)
+    return n
+
+def noise_v2(size, device=None, dtype="float32"):
+    n = randn(size, 100, device=device, dtype=dtype)
+    return n
+
+def ones_target(size, device=None, dtype="float32"):
+    '''
+    Tensor containing ones, with shape = size
+    '''
+    data = ones(size, 1, device=device, dtype=dtype)
+    return data
+
+def zeros_target(size, device=None, dtype="float32"):
+    '''
+    Tensor containing zeros, with shape = size
+    '''
+    data = zeros(size, 1, device=device, dtype=dtype)
+    return data
+
 def rand(*shape, low=0.0, high=1.0, device=None, dtype="float32", requires_grad=False):
     """ Generate random numbers uniform between low and high """
     device = ndl.default_device() if device is None else device

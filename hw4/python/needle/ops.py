@@ -15,6 +15,7 @@ import logging
 import sys
 import functools
 import needle as ndl
+import math
 
 OPS_COUNT = 0
 
@@ -394,6 +395,22 @@ class Log(TensorOp):
 def log(a):
     return Log()(a)
 
+class LimitLog(TensorOp):
+  @logMetric(name='LimitLog_forward')
+  def compute(self, a):
+    temp = a + 1e-10
+    return array_api.log(temp)
+
+  @logMetric(name='LimitLog_backward')
+  def gradient(self, out_grad, node):
+    out_grad = out_grad.cached_data
+    input_node = node.inputs[0].cached_data + 1e-10
+    res = array_api.divide(out_grad, input_node)
+    return Tensor.make_const(res)
+
+
+def limit_log(a):
+    return LimitLog()(a)
 
 class Exp(TensorOp):
     @logMetric(name='Exp_forward')
@@ -426,6 +443,26 @@ class ReLU(TensorOp):
 
 def relu(a):
     return ReLU()(a)
+
+class LeakyReLU(TensorOp):
+    def __init__(self, negative_slope):
+      self.negative_slope = negative_slope
+      
+    @logMetric(name='LeakyReLU_forward')
+    def compute(self, a):
+        return array_api.maximum(a, 0) - self.negative_slope * array_api.maximum(-a, 0)
+
+    @logMetric(name='LeakyReLU_backward')
+    def gradient(self, out_grad, node):
+        out_grad = out_grad.data
+        input = node.inputs[0].data
+        # TODO here might need to be fixed.
+        mask = input.realize_cached_data() > 0 + (input.realize_cached_data() < 0) * self.negative_slope
+        return out_grad * Tensor.make_const(mask)
+
+
+def leakyrelu(a, negative_slope):
+    return LeakyReLU(negative_slope)(a)
 
 
 class LogSumExp(TensorOp):
@@ -485,12 +522,17 @@ def logsumexp(a, axes=None):
 
 class Tanh(TensorOp):
     def compute(self, a):
-        return (array_api.exp(a) - array_api.exp(-1 * a)) / (array_api.exp(a) + array_api.exp(-1 * a))
+        positive = array_api.maximum(a, 0)
+        negative_mask = a < 0
+        negative = -1 * array_api.maximum(-1 * a, 0)
+        positive_mask = a >= 0
+        return ((1 - array_api.exp(-2 * positive)) / (1 + array_api.exp(-2 * positive))) * positive_mask + \
+        ((array_api.exp(2 * negative) - 1) / (1 + array_api.exp(2 * negative))) * negative_mask
 
     def gradient(self, out_grad, node):
-        out_grad = out_grad.data
-        input = node.inputs[0].data
-        return out_grad * (1 - ((exp(input) - exp(-input)) / (exp(input) + exp(-input))) ** 2)
+        out_grad = out_grad.cached_data
+        input = node.inputs[0].cached_data
+        return Tensor.make_const(out_grad * (1 - (Tanh().compute(input)) ** 2))
 
 
 def tanh(a):
@@ -498,7 +540,12 @@ def tanh(a):
 
 class Sigmoid(TensorOp):
     def compute(self, a):
-        return array_api.power((1 + array_api.exp(-1 * a)), -1)
+        positive = array_api.maximum(a, 0)
+        negative_mask = a < 0
+        negative = -1 * array_api.maximum(-1 * a, 0)
+        positive_mask = a >= 0
+        return array_api.power((1 + array_api.exp(-1 * positive)), -1) * positive_mask + \
+        (array_api.exp(negative) / (1 + array_api.exp(negative))) * negative_mask
 
     def gradient(self, out_grad, node):
         out_grad = out_grad.cached_data
